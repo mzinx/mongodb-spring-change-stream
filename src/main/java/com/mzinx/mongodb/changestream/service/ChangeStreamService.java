@@ -132,6 +132,7 @@ public class ChangeStreamService<T> {
 		}
 
 		this.subscribe(event -> {
+			//watch instances collection change
 			if (event.getNamespace().getCollectionName().equals(changeStreamProperties.getInstanceCollection())) {
 				try {
 					if (OperationType.INSERT == event.getOperationType()
