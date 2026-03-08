@@ -14,7 +14,7 @@
 	<version>0.0.3</version>
     <packaging>jar</packaging>
 
-	<name>mongodb-spring-change-stream</name>
+	<name>MongoDB Spring Change Stream</name>
 	<description>MongoDB Change stream Spring extension</description>
 	<url>https://github.com/mzinx/mongodb-spring-change-stream</url>
 	
