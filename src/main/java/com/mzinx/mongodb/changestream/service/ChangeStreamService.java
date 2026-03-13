@@ -299,7 +299,7 @@ public class ChangeStreamService<T> {
 							if (changeStreamProperties.getHostname().equals(doc.getString("_id"))) {
 								if (changeStreams.containsKey(cs.getId())
 										&& cs.isRunning()) {
-									logger.info("Change stream already running");
+									logger.info("Change stream already running in this node");
 								} else {
 									start(reg);
 								}

@@ -98,46 +98,51 @@ public class ChangeStream<T> {
     }
 
     public void watch(Consumer<ChangeStreamDocument<T>> consumer, Consumer<BsonString> checkPoint) {
-        logger.info("Intializing change stream " + this.getId());
-        this.consumer = consumer;
-        if (this.batchSize != null) {
-            this._changeStream = this._changeStream.batchSize(this.batchSize);
-        }
-        if (this.maxAwaitTime != null) {
-            this._changeStream = this._changeStream.maxAwaitTime(this.maxAwaitTime, TimeUnit.MILLISECONDS);
-        }
-        if (resumeToken != null) {
-            this._changeStream = this._changeStream.resumeAfter(new Document("_data", resumeToken).toBsonDocument());
-        }
-        if (fullDocument != null) {
-            this._changeStream = this._changeStream.fullDocument(fullDocument);
-        }
-        if (fullDocumentBeforeChange != null) {
-            this._changeStream = this._changeStream.fullDocumentBeforeChange(fullDocumentBeforeChange);
-        }
-        this.cursor = this._changeStream.cursor();
-        this.setRunning(true);
-        ScheduledExecutorService scheduler = null;
-        if (ResumeStrategy.TIME == this.getResumeStrategy()) {
-            scheduler = this.timer(this, checkPoint);
-        }
+        logger.info("Initializing change stream " + this.getId());
 
-        try {
-            while (this.isRunning()) {
-                ChangeStreamDocument<T> e = this.getCursor().tryNext();
-                if (e != null) {
-                    this.getConsumer().accept(e);
-                    if ((ResumeStrategy.BATCH == this.getResumeStrategy() && this.getCursor().available() == 0)
-                            || ResumeStrategy.EVERY == this.getResumeStrategy()) {
-                        checkPoint.accept(e.getResumeToken().getString("_data"));
+        if (!this.isRunning()) {
+            this.consumer = consumer;
+            if (this.batchSize != null) {
+                this._changeStream = this._changeStream.batchSize(this.batchSize);
+            }
+            if (this.maxAwaitTime != null) {
+                this._changeStream = this._changeStream.maxAwaitTime(this.maxAwaitTime, TimeUnit.MILLISECONDS);
+            }
+            if (resumeToken != null) {
+                this._changeStream = this._changeStream
+                        .resumeAfter(new Document("_data", resumeToken).toBsonDocument());
+            }
+            if (fullDocument != null) {
+                this._changeStream = this._changeStream.fullDocument(fullDocument);
+            }
+            if (fullDocumentBeforeChange != null) {
+                this._changeStream = this._changeStream.fullDocumentBeforeChange(fullDocumentBeforeChange);
+            }
+            this.cursor = this._changeStream.cursor();
+            this.setRunning(true);
+            ScheduledExecutorService scheduler = null;
+            if (ResumeStrategy.TIME == this.getResumeStrategy()) {
+                scheduler = this.timer(this, checkPoint);
+            }
+
+            try {
+                while (this.isRunning()) {
+                    ChangeStreamDocument<T> e = this.getCursor().tryNext();
+                    if (e != null) {
+                        this.getConsumer().accept(e);
+                        if ((ResumeStrategy.BATCH == this.getResumeStrategy() && this.getCursor().available() == 0)
+                                || ResumeStrategy.EVERY == this.getResumeStrategy()) {
+                            checkPoint.accept(e.getResumeToken().getString("_data"));
+                        }
                     }
                 }
-                // TODO: check if sleep needed to avoid high CPU
+            } finally {
+                logger.info("Change stream " + this.getId() + " stopped");
+                if (scheduler != null)
+                    scheduler.shutdown();
             }
-        } finally {
-            logger.info("Change stream " + this.getId() + " stopped");
-            if (scheduler != null)
-                scheduler.shutdown();
+        } else {
+            logger.info("Change stream " + this.getId() + " is already running");
         }
     }
 
