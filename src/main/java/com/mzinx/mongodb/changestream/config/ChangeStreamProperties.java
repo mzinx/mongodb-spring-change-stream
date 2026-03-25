@@ -17,4 +17,5 @@ public class ChangeStreamProperties {
     private long maxTimeout = 5000*10; // ms
     private String resumeTokenCollection = "_resumeTokens";
     private String instanceCollection = "_instances";
+    private String changeStreamCollection = "_changeStreams";
 }
