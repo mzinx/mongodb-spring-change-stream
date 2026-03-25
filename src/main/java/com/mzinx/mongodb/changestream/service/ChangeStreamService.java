@@ -24,6 +24,7 @@ import org.springframework.resilience.annotation.Retryable;
 import org.springframework.stereotype.Service;
 
 import com.mongodb.MongoException;
+import com.mongodb.MongoInterruptedException;
 import com.mongodb.client.model.Accumulators;
 import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
@@ -82,7 +83,7 @@ public class ChangeStreamService<T> {
 
 	private static final String RESUME_TOKEN_PIPELINE_NAME = "getResumeToken";
 	private PipelineTemplate pipelineTemplate;
-
+	
 	@PostConstruct
 	private void init() {
 		mongoTemplate.getCollection(changeStreamProperties.getResumeTokenCollection())
@@ -151,36 +152,9 @@ public class ChangeStreamService<T> {
 								}
 								break;
 							case DELETE:
-								Document doc = this.runForSubstitute(csId, instance);
-								if (Mode.AUTO_RECOVER == cs.getMode()) {
-									if (changeStreamProperties.getHostname().equals(doc.getString("m"))) {
-										if (cs.isRunning()) {
-											if (!changeStreamProperties.getHostname().equals(instance))
-												logger.info(
-														instance + " is dead, I'm still running change stream:"
-																+ cs.getId());
-											else {
-												logger.info("Change stream " + cs.getId()
-														+ " already running in this node");
-
-											}
-										} else {
-											logger.info(
-													instance + " is dead, " + changeStreamProperties.getHostname()
-															+ " try to take over change stream:"
-															+ cs.getId());
-											this._stop(reg);
-											run(reg);
-										}
-									} else {
-										logger.info("Change stream already running in other node:" + doc);
-										if (cs.isRunning()) {
-											logger.info(
-													"Change stream running in this node should stop.");
-											this._stop(reg);
-										}
-									}
-								} else if (Mode.AUTO_SCALE == cs.getMode()) {
+								Document doc = this.runForSubstitute(csId, instance, changeStreamProperties.getHostname());
+								
+								if (Mode.AUTO_SCALE == cs.getMode()) {
 									this._stop(reg);
 									run(reg, ((Document) event.getFullDocumentBeforeChange()).getDate("at"));
 								}
@@ -192,21 +166,6 @@ public class ChangeStreamService<T> {
 				} catch (RuntimeException e) {
 					logger.error("Unexpected error while processing node changes:", e);
 				}
-			} else if (event.getNamespace().getCollectionName()
-					.equals(changeStreamProperties.getChangeStreamCollection())) {
-						this.logger.info("change stream changes: "+event);
-				switch (event.getOperationType()) {
-					case INSERT:
-						break;
-					case UPDATE:
-						//TODO: If leader is null & i is empty, stop the change stream
-						//TODO: If leader or i changed, start/stop
-						break;
-					case DELETE:
-						break;
-					default:
-						break;
-				}
 			}
 		});
 	}
@@ -215,7 +174,7 @@ public class ChangeStreamService<T> {
 	private void destroy() {
 		this.clear();
 		for (String csId : changeStreams.keySet()) {
-			this.stop(changeStreams.get(csId));
+			this.stop(changeStreams.get(csId), false);
 			changeStreams.remove(csId);
 		}
 	}
@@ -240,14 +199,17 @@ public class ChangeStreamService<T> {
 	}
 
 	private Document runForSubstitute(String csId, String deadHost) {
+		return runForSubstitute(csId, deadHost, null);
+	}
+	private Document runForSubstitute(String csId, String deadHost, String replacement) {
 		Document doc = mongoTemplate
 				.getCollection(changeStreamProperties.getChangeStreamCollection()).findOneAndUpdate(
 						Filters.eq("_id", csId), List.of(
 								new Document("$set", new Document()
 										.append("_id", csId)
 										.append("m", new Document("$cond",
-												List.of(new Document("$eq", List.of("$m", deadHost)),
-														changeStreamProperties.getHostname(),
+												List.of(new Document("$eq", List.of(new Document("$ifNull", List.of("$m", deadHost)), deadHost)),
+														replacement,
 														"$m")))
 										.append("at", new Date())
 										.append("i", new Document(
@@ -316,8 +278,10 @@ public class ChangeStreamService<T> {
 						saveCheckpoint(reg.getChangeStream().getId(), resumeToken);
 					});
 				}
+			} catch (MongoInterruptedException e){				
+				logger.info("Change stream '" + reg.getChangeStream().getId() + "' Interrupted");
 			} catch (RuntimeException e) {
-				logger.error("Stopping change stream '" + reg.getChangeStream().getId() + "'' due to unexpected error:",
+				logger.error("Stopping change stream '" + reg.getChangeStream().getId() + "' due to unexpected error:",
 						e);
 				this._stop(reg);
 				// Recover for unexpected exception
@@ -329,18 +293,10 @@ public class ChangeStreamService<T> {
 		logger.info("Change stream " + reg.getChangeStream().getId() + " started");
 	}
 
-	public void stop(ChangeStreamRegistry<T> reg) {
-		logger.info("Stop running change stream");
+	public void stop(ChangeStreamRegistry<T> reg, boolean stopAll) {
+		logger.info("Stop change stream");
 		this._stop(reg);
-		mongoTemplate
-				.getCollection(changeStreamProperties.getChangeStreamCollection()).findOneAndUpdate(
-						Filters.eq("_id", reg.getChangeStream().getId()), List.of(
-								new Document("$set", new Document()
-										.append("_id", reg.getChangeStream().getId())
-										.append("m", null)
-										.append("at", new Date())
-										.append("i", List.of()))),
-						new FindOneAndUpdateOptions().upsert(true).returnDocument(ReturnDocument.AFTER));
+		runForSubstitute(reg.getChangeStream().getId(), stopAll?null:changeStreamProperties.getHostname());
 	}
 
 	public void _stop(ChangeStreamRegistry<T> reg) {
