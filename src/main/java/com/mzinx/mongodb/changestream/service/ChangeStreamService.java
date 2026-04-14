@@ -23,6 +23,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.resilience.annotation.Retryable;
 import org.springframework.stereotype.Service;
 
+import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
 import com.mongodb.MongoInterruptedException;
 import com.mongodb.client.model.Accumulators;
@@ -362,7 +363,7 @@ public class ChangeStreamService<T> {
 				break;
 
 		}
-		// Deregister die member??
+		// Deregister dead member??
 	}
 
 	public void scale(ChangeStreamRegistry<T> reg) {
@@ -400,9 +401,18 @@ public class ChangeStreamService<T> {
 			} catch (MongoInterruptedException e) {
 				this.logger.info("Change stream '" + reg.getChangeStream().getId() + "' Interrupted");
 			} catch (RuntimeException e) {
-				this.logger.error(
-						"Stopping change stream '" + reg.getChangeStream().getId() + "' due to unexpected error:",
-						e);
+				if (e instanceof MongoCommandException && ((MongoCommandException) e).getCode() == 286) {
+					this.logger.warn("Change stream '" + reg.getChangeStream().getId()
+							+ "' history lost, token: '"+ reg.getChangeStream().getResumeToken() +"', restart without resume token");
+							reg.getChangeStream().setResumeToken(null);
+					mongoTemplate.getCollection(changeStreamProperties.getResumeTokenCollection()).deleteOne(
+							Filters.and(Filters.eq(CSID_FIELD, reg.getChangeStream().getId()),
+									Filters.eq(HOST_FIELD, changeStreamProperties.getHostname())));
+				} else {
+					this.logger.error(
+							"Stopping change stream '" + reg.getChangeStream().getId() + "' due to unexpected error:",
+							e);
+				}
 				reg.stop();
 				// Recover for unexpected exception
 				this.start(reg);

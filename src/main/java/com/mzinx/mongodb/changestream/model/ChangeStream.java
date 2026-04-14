@@ -101,6 +101,7 @@ public class ChangeStream<T> {
         logger.info("Initializing change stream " + this.getId());
 
         if (!this.isRunning()) {
+            this.setRunning(true);
             this.consumer = consumer;
             if (this.batchSize != null) {
                 this._changeStream = this._changeStream.batchSize(this.batchSize);
@@ -119,7 +120,6 @@ public class ChangeStream<T> {
                 this._changeStream = this._changeStream.fullDocumentBeforeChange(fullDocumentBeforeChange);
             }
             this.cursor = this._changeStream.cursor();
-            this.setRunning(true);
             ScheduledExecutorService scheduler = null;
             if (ResumeStrategy.TIME == this.getResumeStrategy()) {
                 scheduler = this.timer(this, checkPoint);
