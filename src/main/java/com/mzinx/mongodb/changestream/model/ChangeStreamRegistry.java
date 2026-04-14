@@ -1,7 +1,7 @@
 package com.mzinx.mongodb.changestream.model;
 
-import java.util.HashSet;
-import java.util.Set;
+import java.util.Date;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
@@ -24,6 +24,15 @@ public class ChangeStreamRegistry<T> {
     
     private int instanceIndex;
     private int instanceSize;
-    @Builder.Default
-    private Set<String> instances = new HashSet<>();
+    private String leader;
+    private List<String> instances;
+
+    private Date earliestChangeAt;
+    
+    public void stop(){
+		this.changeStream.setRunning(false);
+		if (this.completableFuture != null)
+			this.completableFuture.join();
+    }
+    
 }
